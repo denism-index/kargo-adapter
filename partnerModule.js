@@ -1,8 +1,8 @@
 /**
  * File Information
  * =============================================================================
- * @overview  Partner Module Template
- * @version   1.5.x
+ * @overview  Kargo Module Template
+ * @version   1.0.0
  * @author    Index Exchange
  * @copyright Copyright (C) 2016 Index Exchange All Rights Reserved.
  *
@@ -13,8 +13,236 @@
  * -----------------------------------------------------------------------------
  */
 
-window.headertag.partnerScopes.push(function() {
+(function() {
     'use strict';
+
+    // === KARGO ===============================================================
+    function readCookie(name) {
+        var nameEquals = name + '=',
+            cookies = document.cookie.split(';'),
+            i, cookie;
+
+        for (i in cookies) {
+            cookie = cookies[i];
+
+            while (cookie.charAt(0) === ' ') {
+                cookie = cookie.substring(1, cookie.length);
+            }
+
+            if (cookie.indexOf(nameEquals) === 0) {
+                return cookie.substring(nameEquals.length, cookie.length);
+            }
+        }
+
+        return null;
+    }
+
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/assign#Polyfill
+    function objectAssign(target, varArgs) { // .length of function is 2
+        'use strict';
+        if (target == null) { // TypeError if undefined or null
+            throw new TypeError('Cannot convert undefined or null to object');
+        }
+
+        var to = Object(target);
+
+        for (var index = 1; index < arguments.length; index++) {
+            var nextSource = arguments[index];
+
+            if (nextSource != null) { // Skip over if undefined or null
+                for (var nextKey in nextSource) {
+                    // Avoid bugs when hasOwnProperty is shadowed
+                    if (Object.prototype.hasOwnProperty.call(nextSource, nextKey)) {
+                        to[nextKey] = nextSource[nextKey];
+                    }
+                }
+            }
+        }
+
+        return to;
+    };
+
+    function compact(arr) {
+        var newArr = [];
+
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i]) {
+                newArr.push(arr[i]);
+            }
+        }
+
+        return newArr;
+    }
+
+    function checkRequired(obj, key, fn) {
+        if (!fn || !Utils.isFunction(fn)) {
+            err.push('Invalid check function in config validation');
+            return false;
+        }
+
+        if (!obj.hasOwnProperty(key) || !fn(obj[key])) {
+            err.push('Invalid config property or subproperty: ' + key);
+            return false;
+        }
+
+        return true;
+    }
+
+    function getKrakenParamsFromConfig(config) {
+        return {
+            "timeout": config.timeout, // ms
+            "currency": config.currency
+        };
+    }
+
+    function getEncodedCrb() {
+        try {
+            var crb = JSON.parse(decodeURIComponent(readCookie('krg_crb'))),
+                syncIds = {};
+
+            if (crb && crb.v) {
+                var vParsed = JSON.parse(atob(crb.v));
+
+                if (vParsed && vParsed.syncIds) {
+                    syncIds = vParsed.syncIds;
+                }
+            }
+
+            return btoa(JSON.stringify(syncIds));
+        }
+        catch (e) {
+            return '';
+        }
+    }
+
+    function getEncodedKid() {
+        try {
+            var uid = JSON.parse(decodeURIComponent(readCookie('krg_uid'))),
+                vData = {};
+
+            if (uid && uid.v) {
+                vData = uid.v;
+            }
+
+            return btoa(JSON.stringify(vData));
+        }
+        catch (e) {
+            return '';
+        }
+    }
+
+    function getKargoIds() {
+        return {
+            crb: getEncodedCrb(),
+            kid: getEncodedKid()
+        };
+    }
+
+    function getAllMetadata() {
+        return {
+            kargoIDs: getKargoIds()
+        };
+    }
+
+    function getAdSlotIds(slotIds, config) {
+        return {
+            adSlotIDs: compact(slotIds.map(function (slotId) {
+                if (config.mapping.hasOwnProperty(slotId) && config.mapping[slotId].length) {
+                    var xSlotKey = config.mapping[slotId][0];
+
+                    if (config.xSlots.hasOwnProperty(xSlotKey)) {
+                        return config.xSlots[xSlotKey].adSlotId;
+                    }
+                }
+
+                return null;
+            }))
+        };
+    }
+
+    // TODO this should maybe be handled inside of Kraken rather than transformed on the fly
+    function transformAdSlotToDemand(config, adSlots, targetingKeys) {
+        var demand = {slot: {}},
+            idMap = {};
+
+        for (var xSlotKey in config.xSlots) {
+            for (var mappingKey in config.mapping) {
+                idMap[config.xSlots[config.mapping[mappingKey][0]].adSlotId] = mappingKey;
+            }
+        }
+
+        for (var adSlotId in adSlots) {
+            var adSlot = adSlots[adSlotId],
+                bidTransformer = BidRoundingTransformer(getBidTransformConfig(adSlot)),
+                targeting = adSlot.targetingPrefix + bidTransformer.transformBid(adSlot.cpm),
+                demandConfig = {};
+
+            demandConfig[targetingKeys.idKey] = adSlotId;
+
+            if (adSlot.targetingCustom) {
+                demandConfig[targetingKeys.pmKey] = targeting;
+                demandConfig[targetingKeys.pmidKey] = adSlot.targetingCustom;
+            }
+            else {
+                demandConfig[targetingKeys.omKey] = targeting;
+            }
+
+            demand.slot[idMap[adSlotId]] = {
+                timestamp: Utils.now(),
+                demand: demandConfig
+            };
+        }
+
+        return demand;
+    }
+
+    function getBidTransformConfig(adSlot) {
+        var floor = 0,
+            buckets = [];
+
+        if (adSlot && adSlot.pricing) {
+            if (adSlot.pricing.floor) {
+                floor = adSlot.pricing.floor;
+            }
+
+            if (adSlot.pricing.buckets) {
+                buckets = adSlot.pricing.buckets;
+            }
+        }
+
+        return {
+            floor: floor,
+            inputCentsMultiplier: 100,
+            outputCentsDivisor: 100,
+            outputPrecision: 2,
+            roundingType: 1,
+            buckets: buckets
+        };
+    }
+
+    function krakenRequest(params, callback, failureCallback) {
+        // TODO point to live Kraken!
+        // var KRAKEN_HOST = 'http://kraken.krg.io';
+        var KRAKEN_HOST = 'https://kraken.dev.kargo.com';
+
+        Network.ajax({
+            url: KRAKEN_HOST + '/api/v1/bid?json=' + params,
+            method: 'GET',
+            partnerId: PARTNER_ID,
+            jsonp: true,
+            withCredentials: true,
+            onSuccess: function(responseText) {
+                try {
+                    callback(JSON.parse(responseText));
+                }
+                catch (e) {
+                    failureCallback();
+                }
+            },
+            onFailure: failureCallback
+        });
+    }
+    // === END KARGO ===========================================================
 
     /* =============================================================================
      * SECTION A | Configure Module Name and Feature Support
@@ -69,7 +297,7 @@ window.headertag.partnerScopes.push(function() {
 
     /* -------------------------------------------------------------------------- */
 
-    var PREFETCH_STATE = {
+    var prefetchState = {
         NEW: 1,
         IN_PROGRESS: 2,
         READY: 3,
@@ -116,6 +344,44 @@ window.headertag.partnerScopes.push(function() {
 
         /* PUT CODE HERE */
 
+        // === KARGO =======================================================
+        (function kargoConfigValidation() {
+            // TODO what is already validated in the config and are we over-validating in this function?
+            if (!Utils.isObject(config)) {
+                err.push('Config object invalid');
+            }
+            else {
+                // TODO what is optional and what is required?
+                var validity = checkRequired(config, 'disabled', Utils.isBoolean) &&
+                               checkRequired(config, 'prefetchEnabled', Utils.isBoolean) &&
+                               checkRequired(config, 'targetingType', Utils.isString) &&
+                               checkRequired(config, 'timeout', Utils.isInteger) &&
+                               checkRequired(config, 'mapping', Utils.isObject) &&
+                               checkRequired(config, 'xSlots', Utils.isObject);
+
+                if (validity) {
+                    for (var key in config.mapping) {
+                        if(!config.mapping.hasOwnProperty(key)){
+                            continue;
+                        }
+
+                        var isArray = checkRequired(config.mapping, key, Utils.isArray);
+
+                        if (isArray) {
+                            for (var i = 0; i < config.mapping[key].length; i++) {
+                                var isValidXSlotType = checkRequired(config.mapping[key], i, Utils.isString);
+
+                                if (isValidXSlotType && !config.xSlots.hasOwnProperty(config.mapping[key][i])) {
+                                    err.push('Invalid xSlot reference in mapping');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })();
+        // === END KARGO ====================================================
+
         /* -------------------------------------------------------------------------- */
 
         var xSlotConfigValid = true;
@@ -134,7 +400,6 @@ window.headertag.partnerScopes.push(function() {
          * -----------------------------------------------------------------------------
          *
          * Validate the specific configurations that must appear in each xSlot.
-         * An xSlot represents an ad slot as it is understood by the partner's end point.
          * Validation functions have been provided in the `Utils` object for
          * convenience. See ../lib/utils.js for more information.
          *
@@ -153,6 +418,13 @@ window.headertag.partnerScopes.push(function() {
          */
 
         /* PUT CODE HERE */
+
+        // === KARGO =======================================================
+        (function kargoSlotValidation() {
+            // TODO we need to make sure we have filled out xSlot config properly
+            checkRequired(config.xSlots[xSlotName], 'adSlotId', Utils.isString);
+        })();
+        // === END KARGO ====================================================
 
         /* -------------------------------------------------------------------------- */
 
@@ -250,65 +522,61 @@ window.headertag.partnerScopes.push(function() {
             return;
         }
 
-        var yourBidder = new Partner(config);
-        window.headertag[PARTNER_ID] = {};
-        window.headertag[PARTNER_ID].callback = yourBidder.responseCallback;
-        window.headertag[PARTNER_ID].render = yourBidder.renderAd;
+        var kargoBidder = new Partner(config);
+        window.headertag[PARTNER_ID] = window.headertag[PARTNER_ID] || {};
+        window.headertag[PARTNER_ID].callback = kargoBidder.responseCallback;
+        window.headertag[PARTNER_ID].render = kargoBidder.renderAd;
 
-        callback(null, yourBidder);
+        callback(null, kargoBidder);
     }
 
     function Partner(config) {
         var _this = this;
 
-        var __targetingType = config.targetingType;
-        var __supportedAnalytics = SUPPORTED_ANALYTICS;
-        var __supportedOptions = SUPPORTED_OPTIONS;
+        var targetingType = config.targetingType;
+        var supportedAnalytics = SUPPORTED_ANALYTICS;
+        var supportedOptions = SUPPORTED_OPTIONS;
 
-        var __prefetch = {
-            state: PREFETCH_STATE.NEW,
+        var prefetch = {
+            state: prefetchState.NEW,
             correlator: null,
             gCorrelator: null,
             slotIds: [],
             callbacks: []
         };
 
-        var __demandStore = {};
-        var __creativeStore = {};
+        var demandStore = {};
+        var creativeStore = {};
 
         /* =============================================================================
          * Set default targeting keys to be used for DFP. Values for omKey and idKey are
-         * mandatory. pmKey/pmidKey(deals) is only necessary if the partner will use a private market.
+         * mandatory. pmKey is only necessary if the partner will use a private market
+         * (deals).
          *
          * Standard values are:
          *
-         * omKey: ix_(PARTNER ID)_cpm
-         * pmKey: ix_(PARTNER ID)_cpm
+         * omKey: ix_(PARTNER ID)_om
+         * pmKey: ix_(PARTNER ID)_pm
          * idKey: ix_(PARTNER ID)_id
-         * pmidKey: ix_(PARTNER ID)_dealid
          */
-        var __targetingKeys = {
-            omKey: 'ix_KARG_cpm',
-            pmKey: 'ix_KARG_cpm',
-            idKey: 'ix_KARG_id',
-            pmidKey: 'ix_KARG_dealid'
+        var targetingKeys = {
+            omKey: 'ix_karg_om',
+            pmKey: 'ix_karg_pm',
+            idKey: 'ix_karg_id',
+            pmidKey: 'ix_karg_pmid'
         };
 
         if (config.targetKeyOverride) {
             if (config.targetKeyOverride.omKey) {
-                __targetingKeys.omKey = config.targetKeyOverride.omKey;
-            }
-
-            if (config.targetKeyOverride.pmKey) {
-                __targetingKeys.pmKey = config.targetKeyOverride.pmKey;
+                omKey = config.targetKeyOverride.omKey;
             }
 
             if (config.targetKeyOverride.idKey) {
-                __targetingKeys.idKey = config.targetKeyOverride.idKey;
+                idKey = config.targetKeyOverride.idKey;
             }
         }
 
-        var __bidTransformer;
+        var bidTransformer;
 
         /* =============================================================================
          * Set the default parameters for interpreting the prices sent by the bidder
@@ -317,7 +585,7 @@ window.headertag.partnerScopes.push(function() {
          * endpoint and expected by the DFP line item targeting. See
          * bid-rounding-transformer.js for more information.
          */
-        var __bidTransformConfig = {          // Default rounding configuration
+        var bidTransformConfig = {          // Default rounding configuration
             "floor": 0,                     // Minimum acceptable bid price
             "inputCentsMultiplier": 100,    // Multiply input bids by this to get cents
             "outputCentsDivisor": 100,      // Divide output bids in cents by this
@@ -333,7 +601,7 @@ window.headertag.partnerScopes.push(function() {
         };
 
         if(config.roundingBuckets){
-            __bidTransformConfig = config.roundingBuckets;
+            bidTransformConfig = config.roundingBuckets;
         }
 
         /* =============================================================================
@@ -342,7 +610,7 @@ window.headertag.partnerScopes.push(function() {
          *
          * var roundedBid = bidTransformer.transformBid(rawBid);
          */
-        __bidTransformer = BidRoundingTransformer(__bidTransformConfig);
+        bidTransformer = BidRoundingTransformer(bidTransformConfig);
 
         /* =============================================================================
          * SECTION E | Copy over the Configurations to Internal Variables
@@ -362,30 +630,180 @@ window.headertag.partnerScopes.push(function() {
         /* -------------------------------------------------------------------------- */
 
         this.getPartnerTargetingType = function getPartnerTargetingType() {
-            return __targetingType;
+            return targetingType;
         };
 
         this.getSupportedAnalytics = function getSupportedAnalytics() {
-            return __supportedAnalytics;
+            return supportedAnalytics;
         };
 
         this.getSupportedOptions = function getSupportedOptions() {
-            return __supportedOptions;
+            return supportedOptions;
         };
 
         this.getPartnerDemandExpiry = function getPartnerDemandExpiry() {
-            return __supportedOptions.demandExpiry;
+            return supportedOptions.demandExpiry;
         };
 
-        function __requestDemandForSlots(htSlotNames, callback){
+        this.setPartnerTargetingType = function setPartnerTargetingType(tt) {
+            if (!validateTargetingType(tt)) {
+                return false;
+            }
+
+            targetingType = tt;
+
+            return true;
+        };
+
+        this.prefetchDemand = function prefetchDemand(correlator, info, analyticsCallback) {
+            prefetch.state = prefetchState.IN_PROGRESS;
+            prefetch.correlator = correlator;
+            prefetch.slotIds = info.divIds.slice();
 
             /* =============================================================================
-             * SECTION F | Request demand from the Module's Ad Server
+             * SECTION F | Prefetch Demand from the Module's Ad Server
              * -----------------------------------------------------------------------------
              *
-             * The `htSlotNames` argument is an array of HeaderTagSlot IDs for which demand
-             * is requested. Look these up in the mapping object of the config to determine
-             * the partner xSlots which should have demand requested for them.
+             * The `info` argument is an object containing all the information required by
+             * this module to prefetch demand.
+             *
+             * prefetch.slotIds will be an array of htSlotIds. Use these to look up the
+             * slots to prefetch from the keys of the mapping object in the configs.
+             *
+             * Make a request to the module's ad server to get demand. If there is an error
+             * simply run the code block in 'STEP 06'. If there are no errors, put the
+             * retrieved demand in `demandStore[correlator]`.
+             *
+             * The demand must be in the following format:
+             *
+             *     {
+             *         slot: {
+             *             <htSlotId>: {
+             *                 timestamp: Utils.now(),
+             *                 demand: {
+             *                     <key>: <value>,
+             *                     <key>: <value>,
+             *                     ...
+             *                 }
+             *             },
+             *             ...
+             *         }
+             *     }
+             */
+
+            /* PUT CODE HERE */
+
+            // === KARGO =======================================================
+            (function kargoPrefetchDemand() {
+                var params = objectAssign(
+                        {},
+                        getKrakenParamsFromConfig(config),
+                        getAdSlotIds(prefetch.slotIds, config),
+                        getAllMetadata()
+                    ),
+                    // This function provided by indexexchange, but moved here inside of a callback
+                    finishCallback = function() {
+                        prefetch.state = prefetchState.READY;
+
+                        analyticsCallback(correlator);
+
+                        for (var x = 0, lenx = prefetch.callbacks.length; x < lenx; x++) {
+                            setTimeout(prefetch.callbacks[x], 0);
+                        }
+                    },
+                    callback = function(adSlots) {
+                        demandStore[correlator] = transformAdSlotToDemand(config, adSlots, targetingKeys);
+                        _this.responseCallback(adSlots);
+                        finishCallback();
+                    },
+                    encodedParams = encodeURIComponent(JSON.stringify(params)),
+                    failureCallback = function() {
+                        // Just continue if there was a failure...
+                        finishCallback();
+                    };
+
+                krakenRequest(encodedParams, callback, failureCallback);
+            })();
+            // === END KARGO ===================================================
+
+            /* -------------------------------------------------------------------------- */
+
+            /* =============================================================================
+             * SECTION G | End Prefetch
+             * -----------------------------------------------------------------------------
+             *
+             * Ensure this section happens after the demand has been prefetched or an error
+             * has occurred. This may mean putting it in a callback function.
+             */
+
+            // === KARGO: Moved above ==========================================
+            // prefetch.state = prefetchState.READY;
+
+            // analyticsCallback(correlator);
+
+            // for (var x = 0, lenx = prefetch.callbacks.length; x < lenx; x++) {
+            //     setTimeout(prefetch.callbacks[x], 0);
+            // }
+            // === END KARGO: Moved above ======================================
+
+            /* -------------------------------------------------------------------------- */
+        };
+
+        this.getDemand = function getDemand(correlator, slots, callback) {
+            if (prefetch.state === prefetchState.IN_PROGRESS) {
+                var currentDivIds = Utils.getDivIds(slots);
+                var prefetchInProgress = false;
+
+                for (var x = 0, lenx = currentDivIds.length; x < lenx; x++) {
+                    var slotIdIndex = prefetch.slotIds.indexOf(currentDivIds[x]);
+
+                    if (slotIdIndex !== -1) {
+                        prefetch.slotIds.splice(slotIdIndex, 1);
+                        prefetchInProgress = true;
+                    }
+                }
+
+                if (prefetchInProgress) {
+                    prefetch.callbacks.push(getDemand.bind(_this, correlator, slots, callback));
+                    return;
+                }
+            }
+
+            var demand = {
+                slot: {}
+            };
+
+            if (prefetch.state === prefetchState.READY) {
+                for (var i = slots.length - 1; i >= 0; i--) {
+                    var divId = slots[i].getSlotElementId();
+
+                    if (demandStore[prefetch.correlator].slot.hasOwnProperty(divId)) {
+                        if (supportedOptions.demandExpiry < 0 || (Utils.now() - demandStore[prefetch.correlator].slot[divId].timestamp) <= supportedOptions.demandExpiry) {
+                            demand.slot[divId] = demandStore[prefetch.correlator].slot[divId];
+                            slots.splice(i, 1);
+                        }
+
+                        delete demandStore[prefetch.correlator].slot[divId];
+                    }
+                }
+
+                if (!Utils.validateNonEmptyObject(demandStore[prefetch.correlator].slot)) {
+                    prefetch.state = prefetchState.USED;
+                }
+
+                if (!slots.length) {
+                    callback(null, demand);
+                    return;
+                }
+            }
+
+            /* =============================================================================
+             * SECTION H | Return Demand from the Module's Ad Server
+             * -----------------------------------------------------------------------------
+             *
+             * The `slots` argument is an array of HeaderTagSlot objects for which demand
+             * is requested. Call the getSlotElementId function on these objects to obtain
+             * their IDs to look up in the mapping object of the config.
              *
              * Make a request to the module's ad server to get demand. If there is an error
              * while doing so, then call `callback` as such:
@@ -403,139 +821,56 @@ window.headertag.partnerScopes.push(function() {
              * format:
              *
              *     {
-             *         <htSlotId>: {
-             *             demand: {
-             *                 <key>: <value>,
-             *                 <key>: <value>,
-             *                 ...
-             *             }
-             *         },
-             *         ...
+             *         slot: {
+             *             <htSlotId>: {
+             *                 timestamp: Utils.now(),
+             *                 demand: {
+             *                     <key>: <value>,
+             *                     <key>: <value>,
+             *                     ...
+             *                 }
+             *             },
+             *             ...
+             *         }
              *     }
              */
 
             /* PUT CODE HERE */
+            // === KARGO =======================================================
+            (function kargoGetDemand() {
+                var params = objectAssign(
+                        {},
+                        getKrakenParamsFromConfig(config),
+                        getAdSlotIds(slots.map(function(slot) { return slot.getSlotElementId() }), config),
+                        getAllMetadata()
+                    ),
+                    successCallback = function(adSlots) {
+                        var newDemand = transformAdSlotToDemand(config, adSlots, targetingKeys);
+
+                        if (demand) {
+                            for (var key in demand.slot) {
+                                newDemand.slot[key] = demand.slot[key];
+                            }
+                        }
+
+                        callback(null, newDemand);
+                        _this.responseCallback(adSlots);
+                    },
+                    encodedParams = encodeURIComponent(JSON.stringify(params)),
+                    failureCallback = function() {
+                        callback('Request to Kargo Kraken failed');
+                    };
+
+                krakenRequest(encodedParams, successCallback, failureCallback);
+            })();
+            // === END KARGO ===================================================
 
             /* -------------------------------------------------------------------------- */
-
-        }
-
-        this.prefetchDemand = function prefetchDemand(correlator, info, analyticsCallback) {
-            var slotsToFetch = [];
-            if (info.hasOwnProperty('divIds')) {
-                slotsToFetch = info.divIds.slice();
-            }
-            __prefetch.state = PREFETCH_STATE.IN_PROGRESS;
-            __prefetch.correlator = correlator;
-            __prefetch.slotIds = slotsToFetch.slice();
-
-            __demandStore[correlator] = {
-                slot: {}
-            };
-
-            for(var i = 0; i < slotsToFetch.length; i++){
-                __demandStore[correlator].slot[slotsToFetch[i]] = {};
-            }
-            
-            __requestDemandForSlots(slotsToFetch, function(err, demandForSlots) {
-                if(err){
-                    console.log(err);
-                }
-
-                if(demandForSlots){
-                    for (var k = 0; k < slotsToFetch.length; k++) {
-                        if (demandForSlots.hasOwnProperty(slotsToFetch[k])) {
-                            __demandStore[correlator].slot[slotsToFetch[k]] = {};
-                            __demandStore[correlator].slot[slotsToFetch[k]].timestamp = Utils.now();
-                            __demandStore[correlator].slot[slotsToFetch[k]].demand = demandForSlots[slotsToFetch[k]].demand;
-                        }
-                    }
-                }
-
-                prefetch.state = prefetchState.READY;
-
-                analyticsCallback(correlator);
-
-                for (var j = 0; j < __prefetch.callbacks.length; j++) {
-                    setTimeout(prefetch.callbacks[x], 0);
-                }
-            });
         };
 
-        this.getDemand = function getDemand(correlator, slots, callback) {
-            var htSlotNames = Utils.getDivIds(slots);
-
-            if (__prefetch.state === PREFETCH_STATE.IN_PROGRESS) {
-                var prefetchInProgress = false;
-
-                for (var x = 0; x < htSlotNames.length; x++) {
-                    var slotIdIndex = __prefetch.slotIds.indexOf(htSlotNames[x]);
-
-                    if (slotIdIndex !== -1) {
-                        __prefetch.slotIds.splice(slotIdIndex, 1);
-                        prefetchInProgress = true;
-                    }
-                }
-
-                if (prefetchInProgress) {
-                    __prefetch.callbacks.push(getDemand.bind(_this, correlator, slots, callback));
-                    return;
-                }
-            }
-
-            var demand = {
-                slot: {}
-            };
-
-            if (__prefetch.state === PREFETCH_STATE.READY) {
-                for (var i = htSlotNames.length - 1; i >= 0; i--) {
-                    var htSlot = htSlotNames[i];
-
-                    if (__demandStore[__prefetch.correlator].slot.hasOwnProperty(htSlot)) {
-                        if (__supportedOptions.demandExpiry < 0 || (Utils.now() - __demandStore[__prefetch.correlator].slot[htSlot].timestamp) <= __supportedOptions.demandExpiry) {
-                            demand.slot[htSlot] = demandStore[__prefetch.correlator].slot[htSlot];
-                            htSlotNames.splice(i, 1);
-                        }
-
-                        delete __demandStore[__prefetch.correlator].slot[htSlot];
-                    }
-                }
-
-                if (!Utils.validateNonEmptyObject(__demandStore[__prefetch.correlator].slot)) {
-                    __prefetch.state = PREFETCH_STATE.USED;
-                }
-
-                if (!htSlotNames.length) {
-                    callback(null, demand);
-                    return;
-                }
-            }
-
-            __requestDemandForSlots(htSlotNames, function(err, demandForSlots){
-                if (err) {
-                    callback(err);
-                    return;
-                }
-
-                if(!demandForSlots){
-                    callback('Error: demandForSlots not set');
-                    return;
-                }
-
-                for (var htSlotName in demandForSlots) {
-                    if (!demandForSlots.hasOwnProperty(htSlotName)) {
-                        continue;
-                    }
-                    demand.slot[htSlotName] = demandForSlots[htSlotName];
-                    demand.slot[htSlotName].timestamp = Utils.now();
-                }
-                callback(null, demand);
-            });
-        };
-
-        this.responseCallback = function(responseObj){
+        this.responseCallback = function(adSlots){
             /* =============================================================================
-             * SECTION G | Parse Demand from the Module's Ad Server
+             * SECTION I | Parse Demand from the Module's Ad Server
              * -----------------------------------------------------------------------------
              *
              * Run this function as a callback when the ad server responds with demand.
@@ -544,12 +879,22 @@ window.headertag.partnerScopes.push(function() {
 
             /* PUT CODE HERE */
 
+            // === KARGO =======================================================
+            (function kargoResponseCallback() {
+                for (var adSlotId in adSlots) {
+                    var adSlot = adSlots[adSlotId];
+                    creativeStore[adSlotId] = creativeStore[adSlotId] || {};
+                    creativeStore[adSlotId][adSlot.targetingPrefix.split('_')[0]] = adSlot.adm;
+                }
+            })();
+            // === END KARGO ===================================================
+
             /* -------------------------------------------------------------------------- */
         };
 
         this.renderAd = function(doc, targetingMap, width, height) {
             /* =============================================================================
-             * SECTION H | Render function
+             * SECTION J | Render function
              * -----------------------------------------------------------------------------
              *
              * This function will be called by the DFP creative to render the ad. It should
@@ -559,17 +904,10 @@ window.headertag.partnerScopes.push(function() {
 
             if (doc && targetingMap && width && height) {
                 try {
-                    var id = targetingMap[__targetingKeys.idKey][0];
-                    
-                    var sizeKey = width + 'x' + height;
-                    if (window.headertag.sizeRetargeting && window.headertag.sizeRetargeting[sizeKey]){
-                        width = window.headertag.sizeRetargeting[sizeKey][0];
-                        height = window.headertag.sizeRetargeting[sizeKey][1];
-                    }
+                    var id = targetingMap[targetingKeys.idKey];
+                    var creative = creativeStore[id][width + 'x' + height];
 
-                    var ad = __creativeStore[id][width + 'x' + height].ad;
-
-                    doc.write(ad);
+                    doc.write(creative);
                     doc.close();
                     if (doc.defaultView && doc.defaultView.frameElement) {
                         doc.defaultView.frameElement.width = width;
@@ -585,4 +923,4 @@ window.headertag.partnerScopes.push(function() {
     }
 
     window.headertag.registerPartner(PARTNER_ID, init);
-});
+})();
