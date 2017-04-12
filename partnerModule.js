@@ -13,7 +13,7 @@
  * -----------------------------------------------------------------------------
  */
 
-(function() {
+window.headertag.partnerScopes.push(function() {
     'use strict';
 
     // === KARGO ===============================================================
@@ -90,8 +90,7 @@
 
     function getKrakenParamsFromConfig(config) {
         return {
-            "timeout": config.timeout, // ms
-            "currency": config.currency
+            "timeout": config.timeout // ms
         };
     }
 
@@ -173,7 +172,6 @@
 
         for (var adSlotId in adSlots) {
             var adSlot = adSlots[adSlotId],
-                bidTransformer = BidRoundingTransformer(getBidTransformConfig(adSlot)),
                 targeting = adSlot.targetingPrefix + bidTransformer.transformBid(adSlot.cpm),
                 demandConfig = {};
 
@@ -221,10 +219,8 @@
     }
 
     function krakenRequest(params, callback, failureCallback) {
-        // TODO point to live Kraken!
-        // var KRAKEN_HOST = 'http://kraken.krg.io';
+        var KRAKEN_HOST = 'http://kraken.krg.io';
         var KRAKEN_HOST = 'https://kraken.dev.kargo.com';
-
         Network.ajax({
             url: KRAKEN_HOST + '/api/v1/bid?json=' + params,
             method: 'GET',
@@ -568,11 +564,19 @@
 
         if (config.targetKeyOverride) {
             if (config.targetKeyOverride.omKey) {
-                omKey = config.targetKeyOverride.omKey;
+                targetingKeys.omKey = config.targetKeyOverride.omKey;
             }
 
             if (config.targetKeyOverride.idKey) {
-                idKey = config.targetKeyOverride.idKey;
+                targetingKeys.idKey = config.targetKeyOverride.idKey;
+            }
+
+            if (config.targetKeyOverride.pmKey) {
+                targetingKeys.pmKey = config.targetKeyOverride.pmKey;
+            }
+
+            if (config.targetKeyOverride.pmidKey) {
+                targetingKeys.pmidKey = config.targetKeyOverride.pmidKey;
             }
         }
 
@@ -923,4 +927,4 @@
     }
 
     window.headertag.registerPartner(PARTNER_ID, init);
-})();
+});
