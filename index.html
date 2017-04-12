@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title></title>
+    <script type="text/javascript">
+        window.headertag = window.headertag || {};
+        window.headertag.partnerScopes = [];
+        window.headertagconfig={siteId:2,enableSingleRequest:!0,disableInitialLoad:!1,overrideGoogletag:!1,timeout:1e3,prefetch:{enabled:!0,pageTypeMapping:{na:["db95e68c-2f5f-6ec4-c841-a5ececc07b0a","5b21496d-f88d-c097-064c-4170d8e75d3c","d087513f-4233-054f-9355-ffb4266f6ad5","824b3a73-b1fd-1a50-481a-d2497c7b486a"]}},htSlots:{desktop:{"db95e68c-2f5f-6ec4-c841-a5ececc07b0a":{sizeMapping:{"0x0":[[728,90]]},deviceType:"desktop",divId:"div-gpt-d0"},"5b21496d-f88d-c097-064c-4170d8e75d3c":{sizeMapping:{"0x0":[[300,250]]},deviceType:"desktop",divId:"div-gpt-d1"},"d087513f-4233-054f-9355-ffb4266f6ad5":{sizeMapping:{"0x0":[[300,600]]},deviceType:"desktop",divId:"div-gpt-d2"}},mobile:{"824b3a73-b1fd-1a50-481a-d2497c7b486a":{sizeMapping:{"0x0":[[320,50]]},deviceType:"mobile",divId:"div-gpt-m1"}}},slotMappingTypes:["selectByStaticDivId"],partners:{INDX:{targetingType:"slot",prefetchEnabled:!0,timeout:0,disabled:!1,privateKey:"IPM",publicKey:"IOM"}}};
+        window.headertag.deviceType = 'desktop';
+        window.headertag.pagetype = 'na';
+    </script>
+    <script src="partnerConfig.js"></script>
+    <script src="partnerModule.js"></script>
+    <script src="headerTagWrapper.js"></script>
+    <script type='text/javascript'>
+        var googletag = googletag || {};
+        googletag.cmd = googletag.cmd || [];
+        (function () {
+            var gads = document.createElement('script');
+            gads.async = true;
+            gads.type = 'text/javascript';
+            var useSSL = 'https:' == document.location.protocol;
+            gads.src = (useSSL ? 'https:' : 'http:') +
+                '//www.googletagservices.com/tag/js/gpt.js';
+            var node = document.getElementsByTagName('script')[0];
+            node.parentNode.insertBefore(gads, node);
+        })();
+    </script>
+    <script type="text/javascript">
+        googletag.cmd.push(function () {
+            if (typeof window.headertag === 'undefined' || window.headertag.apiReady !== true) {
+                window.headertag = googletag;
+            }
+        });
+    </script>
+    <script type='text/javascript'>
+        googletag.cmd.push(function () {
+            googletag.defineSlot('/62650033/partners-selfserve', [
+                    [728, 90]
+                ], 'div-gpt-d0')
+                .addService(googletag.pubads());
+            googletag.defineSlot('/62650033/partners-selfserve', [
+                    [300, 250]
+                ], 'div-gpt-d1')
+                .addService(googletag.pubads());
+            googletag.defineSlot('/62650033/partners-selfserve', [
+                    [300, 600]
+                ], 'div-gpt-d2')
+                .addService(googletag.pubads());
+            googletag.defineSlot('/62650033/partners-selfserve', [
+                    [320, 50]
+                ], 'div-gpt-m1')
+                .addService(googletag.pubads());
+
+            googletag.pubads().enableSingleRequest();
+            googletag.enableServices();
+        });
+    </script>
+    <script>
+        function callRefresh() {
+            headertag.pubads().refresh();
+        }
+    </script>
+    <script>
+        function callDisplay() {
+            headertag.display('div-gpt-d0');
+            headertag.display('div-gpt-d1');
+            headertag.display('div-gpt-d2');
+            headertag.display('div-gpt-m1');
+        }
+    </script>
+</head>
+
+<body>
+    <h4>Index Exchange - Self Serve Partner Test Page</h4>
+    <h4>Ads below...</h4>
+    <button onclick="callDisplay()">Display all slots!</button> <br>
+    <button onclick="callRefresh()">Refresh all slots!</button> <br>
+    <h4>div-gpt-d0 728x90</h4>
+    <div id='div-gpt-d0'>
+    </div>
+    <h4>div-gpt-d1 300x250</h4>
+    <div id='div-gpt-d1'>
+    </div>
+    <h4>div-gpt-d2 300x600</h4>
+    <div id='div-gpt-d2'>
+    </div>
+    <h4>div-gpt-m1 320x50</h4>
+    <div id='div-gpt-m1'>
+    </div>
+
+</body>
+</html>
