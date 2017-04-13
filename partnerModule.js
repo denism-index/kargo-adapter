@@ -220,7 +220,7 @@ window.headertag.partnerScopes.push(function() {
 
     function krakenRequest(params, callback, failureCallback) {
         var KRAKEN_HOST = 'http://kraken.krg.io';
-        var KRAKEN_HOST = 'https://kraken.dev.kargo.com';
+
         Network.ajax({
             url: KRAKEN_HOST + '/api/v1/bid?json=' + params,
             method: 'GET',
